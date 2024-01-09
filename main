@@ -1,0 +1,436 @@
+from fpdf import FPDF
+from tkinter import *
+from tkinter import simpledialog, messagebox, colorchooser
+import openai
+from tkinter import scrolledtext as st
+import ttkbootstrap as ttk
+import os 
+import time
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+import string
+import threading
+from winotify import Notification, audio
+
+
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
+
+pdf = FPDF('P', 'mm', 'Letter')  
+pdf.add_page()
+pdf.set_auto_page_break(auto=TRUE, margin=1)
+pdf.set_line_width(1.5)
+
+
+root = ttk.Window(themename='flatly')
+root.geometry("1500x800+200+150")
+root.title("Chat API")
+root.resizable(width=False, height=False)
+root.bind_all("<Button-1>", lambda event: event.widget.focus_set())
+
+prompt = StringVar()
+responseText = st.ScrolledText(root)
+
+#main API text fetch
+def run():
+    for _ in range(10):
+        time.sleep(0.2)
+        
+    responseText.delete(1.0, END)
+
+    prompting = promptGet.get()
+    if prompting == "":
+        messagebox.showerror(title="ERROR", message="please enter text")
+    
+    else:
+        mssg = f"write about {prompting} in {selected_option.get()} exactly words, without a title, use proper capitalization"
+
+        response = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
+            temperature=1,
+            messages=[
+                {"role": "user", "content": mssg}
+            ] 
+        )
+        
+        assistantResponse = response.choices[0].message.content
+
+        chunk_size = 500  
+        for i in range(0, len(assistantResponse), chunk_size):
+            chunk = assistantResponse[i:i + chunk_size]
+            print(chunk)
+            responseText.insert(END, chunk)
+            responseText.update_idletasks()
+                    
+        wordCount = len(responseText.get(1.0, END).split())
+        charCount = len(responseText.get(1.0, END))
+        sentCount = len(responseText.get(1.0, END).split("."))-1
+
+        wordDisplay = Label(text=(f"Words: {wordCount}, Sentences: {sentCount}, Characters: {charCount}"))
+        wordDisplay.config(fg='black', font=('Lato', 15, 'bold'))
+        wordDisplay.place(x=29, y=750)
+
+
+#progress bar    
+def start_function_with_loader():
+    progress_bar = ttk.Progressbar(root, mode='indeterminate')
+    progress_bar.place(x=572, y=750, width=596)
+    progress_bar.start()
+
+    def run_long_running_function():
+        run()
+      
+        progress_bar.stop()
+        time.sleep(2)
+        progress_bar.destroy()
+
+    thread = threading.Thread(target=run_long_running_function)
+    thread.start()
+
+#remove default text from promt box
+donet = False  
+def delText(e): 
+    global donet
+    if donet:
+        return
+    donet = True
+    return promptGet.delete(0, END) 
+
+#find text
+def find_all(nocase=False):
+    find_text = simpledialog.askstring("Find", "Enter text to find:")
+    if find_text:
+        content = responseText.get(1.0, END)
+        start = 1.0
+        while True:
+            if nocase:
+                pos = responseText.search(find_text, start, stopindex=END, nocase=1)
+            else:
+                pos = responseText.search(find_text, start, stopindex=END)
+            if not pos:
+                break
+            end = f"{pos}+{len(find_text)}c"
+            responseText.tag_add("found", pos, end)
+            start = end
+        responseText.tag_config("found", background="#95A5A6", foreground='white')
+
+#replace text
+def replace_all(nocase=False):
+    find_text = simpledialog.askstring("Find", "Enter text to find:")
+    replace_text = simpledialog.askstring("Replace", f"Replace '{find_text}' with:", parent=root)
+    if find_text and replace_text:
+        content = responseText.get(1.0, END)
+        if nocase:
+            content = content.lower()
+            find_text = find_text.lower()
+        content = content.replace(find_text, replace_text)
+        responseText.delete(1.0, END)
+        responseText.insert(INSERT, content)
+
+#save and send pdf
+def save_email():
+    if messagebox.askyesno('Question', "do you want an email copy?") == True:
+        
+        fileWT = responseText.get(1.0, END)
+    
+        new = Tk()
+        new.geometry("500x500+700+300")
+        new.title("Send Email")
+        new.resizable(width=False, height=False)
+        
+        emailDisplay = Label(new, text=("Enter Email: "))
+        emailDisplay.config(fg='black', font=('Lato', 16, 'bold'))
+        emailDisplay.place(x=37, y=55)
+        
+        emailTo =  Entry(new, font=('Lato', 16, 'bold'), fg='black', bg='white')
+        emailTo.place(x=180, y=44, width=297, height=50)
+        emailTo.config(relief='solid', border=2, background='white')
+        
+        docTitle = Label(new, text=("Essay Title: "))
+        docTitle.config(fg='black', font=('Lato', 16, 'bold'))
+        docTitle.place(x=37, y=125)
+        
+        title = StringVar()
+        EntdocTitle =  Entry(new, font=('Lato', 16, 'bold'), fg='black', bg='white', textvariable=title)
+        EntdocTitle.place(x=180, y=114, width=297, height=50)
+        EntdocTitle.config(relief='solid', border=2, background='white')
+        
+        nameDisplay = Label(new, text=("Full Name: "))
+        nameDisplay.config(fg='black', font=('Lato', 16, 'bold'))
+        nameDisplay.place(x=37, y=195)
+
+        global nameGet
+        name = StringVar()
+        nameGet =  Entry(new, font=('Lato', 16, 'bold'), fg='black', bg='white', textvariable=name)
+        nameGet.place(x=180, y=184, width=297, height=50)
+        nameGet.config(relief='solid', border=2, background='white')
+        
+        fontDisplay = Label(new, text=("Font Size: "))
+        fontDisplay.config(fg='black', font=('Lato', 16, 'bold'))
+        fontDisplay.place(x=37, y=262)
+        
+        fontss = ["2", '4', '8', '10', '12' , '14', '16', '18']
+        
+        font_option = IntVar(new)
+        font_option.set(fontss[4])
+        
+        dropdown_menu = OptionMenu(new, font_option, *fontss)
+        dropdown_menu.place(x=180, y=254, height=50, width=297)
+        dropdown_menu.config(relief='solid', border=2, background='white', fg='black', cursor='hand2', font=('Lato', 15, 'bold'))
+        
+        def choose():
+            global Red, Green, Blue
+            colours = colorchooser.askcolor(title="Pick Font Color", parent=new)
+            rgbvalue = colours[0]
+            Red, Green, Blue = rgbvalue
+            pickcolour.config(background=f'{colours[1]}')
+        
+        colDisplay = Label(new, text=("Font Colour: "))
+        colDisplay.config(fg='black', font=('Lato', 16, 'bold'))
+        colDisplay.place(x=37, y=332)
+                     
+        pickcolour = Button(new, text="", command=choose)
+        pickcolour.place(x=180, y=322, height=50, width=297)
+        pickcolour.config(fg='black', font=('Lato', 15, 'bold'), relief='solid', border=2, background='white', activebackground='grey', cursor='hand2')
+        
+        def sendEmail():
+            if emailTo.get() == "" or EntdocTitle.get() == "" or nameGet.get() =="":
+                messagebox.showwarning("Data Not Filled", "please enter details", parent=new)
+                
+            else:          
+                with open(r'C:\Users\gitik\Downloads\Coding\project-docs\content.txt', 'w') as file:
+                    file.write(f"Title: {string.capwords(EntdocTitle.get())}\n\n")
+                    file.write(f"{fileWT}\n\n")
+                    file.write(f"By: {string.capwords(nameGet.get())}")
+
+           
+                pdf.set_font("Times", size = font_option.get())
+                pdf.set_text_color(r=Red, g=Green, b=Blue)
+                
+                f = open(r'C:\Users\gitik\Downloads\Coding\project-docs\content.txt', "r")
+
+                for x in f: 
+                    pdf.multi_cell(190, 5, txt = x, align = 'L')
+                    
+                pdf.output("text.pdf")
+            
+                print("sendingg....")
+                
+                smtpPort = 587
+                smtpServer = "smtp.gmail.com"
+            
+                emailFrom = "inconnect.otp@gmail.com"
+                pswd = "lqomufxspqvisoeg"
+                body = "Report"
+                
+                try:       
+                    print("sendingg....")
+                    msg = MIMEMultipart()
+                    msg["From"] = f"Your PDF"
+                    msg["To"] = emailTo.get()
+
+                    msg["Subject"] =  string.capwords(EntdocTitle.get())
+                     
+                    msg.attach(MIMEText(body, "plain"))
+                    
+                    filename = "text.pdf"
+                    attachment = open(filename, "rb")
+                    
+                    attachment_package = MIMEBase('application', 'octet-stream')
+                    attachment_package.set_payload((attachment).read())
+                    encoders.encode_base64(attachment_package)
+                    attachment_package.add_header('Content-Disposition', "attachment; filename= " + filename)
+                    msg.attach(attachment_package)
+                      
+                    textt = msg.as_string()
+                     
+                    server = smtplib.SMTP(smtpServer, smtpPort)
+                    server.starttls()
+                    server.login(emailFrom, pswd)
+                    
+                    server.sendmail(emailFrom, emailTo.get(), textt)
+                    
+                except Exception as e:
+                    print(e)
+                    
+                finally:
+                    notify = Notification(app_id="Chatty AI", 
+                            title="Email Sent", 
+                            msg=f"Email Sent to: {emailTo.get()}", 
+                            duration="short", 
+                            icon=r"C:\Users\gitik\Downloads\Coding\mailsent.png")
+                    notify.set_audio(audio.Mail, loop=False)
+                    notify.show()
+                    
+                    time.sleep(2)
+                    server.quit()
+                    
+                    time.sleep(3)
+                    new.destroy()
+            
+        emailGo = Button(new, text='Submit', command=sendEmail)
+        emailGo.config(fg='black', width=10, font=('Lato', 15, 'bold'), relief='solid', border=2, background='white', activebackground='grey', cursor='hand2')
+        emailGo.place(x=37, y=402, width=200, height=50)
+        
+    else:
+        fileWT = responseText.get(1.0, END)
+        
+        new = Tk()
+        new.geometry("500x500+700+300")
+        new.title("Save PDF")
+        new.resizable(width=False, height=False)
+     
+        docTitle = Label(new, text=("Essay Title: "))
+        docTitle.config(fg='black', font=('Lato', 16, 'bold'))
+        docTitle.place(x=37, y=55)
+        
+        title = StringVar()
+        EntdocTitle =  Entry(new, font=('Lato', 16, 'bold'), fg='black', bg='white', textvariable=title)
+        EntdocTitle.place(x=180, y=44, width=297, height=50)
+        EntdocTitle.config(relief='solid', border=2, background='white')
+        
+        nameDisplay = Label(new, text=("Full Name: "))
+        nameDisplay.config(fg='black', font=('Lato', 16, 'bold'))
+        nameDisplay.place(x=37, y=125)
+
+        name = StringVar()
+        nameGet =  Entry(new, font=('Lato', 16, 'bold'), fg='black', bg='white', textvariable=name)
+        nameGet.place(x=180, y=114, width=297, height=50)
+        nameGet.config(relief='solid', border=2, background='white')
+        
+        fontDisplay = Label(new, text=("Font Size: "))
+        fontDisplay.config(fg='black', font=('Lato', 16, 'bold'))
+        fontDisplay.place(x=37, y=195)
+        
+        fontss = ["2", '4', '8', '10', '12', '14', '16', '18']
+        
+        font_option = IntVar(new)
+        font_option.set(fontss[4])
+        
+        dropdown_menu = OptionMenu(new, font_option, *fontss)
+        dropdown_menu.place(x=180, y=184, height=50, width=297)
+        dropdown_menu.config(relief='solid', border=2, background='white', fg='black', cursor='hand2', font=('Lato', 15, 'bold'))
+        
+        def choose():      
+            global Red, Green, Blue
+            colours = colorchooser.askcolor(title="Pick Font Color", parent=new)
+            rgbvalue = colours[0]
+            Red, Green, Blue = rgbvalue
+            pickcolour.config(background=f'{colours[1]}')
+            
+        colDisplay = Label(new, text=("Font Colour: "))
+        colDisplay.config(fg='black', font=('Lato', 16, 'bold'))
+        colDisplay.place(x=37, y=264)
+                    
+        pickcolour = Button(new, text="", command=choose)
+        pickcolour.place(x=180, y=253, height=50, width=297)
+        pickcolour.config(fg='black', font=('Lato', 15, 'bold'), relief='solid', border=2, background='white', activebackground='grey', cursor='hand2')
+            
+        def saveFile():
+            if EntdocTitle.get() == "" or nameGet.get() =="":
+                messagebox.showwarning("Data Not Filled", "please enter details", parent=new)
+                
+            else:  
+                try:
+                    with open(r'C:\Users\gitik\Downloads\Coding\project-docs\content.txt', 'w') as file:
+                        file.write(f"Title: {string.capwords(EntdocTitle.get())}\n\n")
+                        file.write(f"{fileWT}\n\n")
+                        file.write(f"By: {string.capwords(nameGet.get())}")
+            
+                    pdffont = font_option.get()
+                    pdf.set_font("Times", size = font_option.get())
+                    pdf.set_text_color(r=Red, g=Green, b=Blue)
+
+                    f = open(r'C:\Users\gitik\Downloads\Coding\project-docs\content.txt', "r")
+
+                    for x in f: 
+                        pdf.multi_cell(190, 5, txt = x, align = 'L')
+                        
+                    pdf.output(f"{EntdocTitle.get()}.pdf")
+
+                finally:
+                    time.sleep(2)
+                    
+                    notify = Notification(app_id="Chatty AI", 
+                                title="File Saved", 
+                                msg=f"File Saved as '{EntdocTitle.get()}' successfully", 
+                                duration="short", 
+                                icon=r"C:\Users\gitik\Downloads\Coding\fileadded.png")
+                    notify.set_audio(audio.Default, loop=False)
+                    notify.show()
+                    
+                    time.sleep(3)
+                    new.destroy()
+                  
+        savepdf = Button(new, text='Submit', command=saveFile)
+        savepdf.config(fg='black', width=10, font=('Lato', 15, 'bold'), relief='solid', border=2, background='white', activebackground='grey', cursor='hand2')
+        savepdf.place(x=37, y=402, width=200, height=50)
+        
+def clear_text():
+    responseText.delete(1.0, END)
+    
+#main text
+responseText = st.ScrolledText(font=('Lato', 15, 'bold'), padx=10, pady=10, wrap=WORD)
+responseText.place(x=29, y=97, width=1442, height=635)
+responseText.config(relief='solid', border=2, undo=TRUE)
+
+#prompt entry
+promptGet = Entry(font=('Lato', 15, 'bold'), textvariable=prompt, width=50, foreground='grey')
+promptGet.place(x=29, y=23, height=50, width=588)
+promptGet.config(relief='solid', border=2, background='white')
+promptGet.insert(0, " Enter Prompt")
+promptGet.bind("<FocusIn>", delText)
+
+#optionmenu words
+options = ['50', '100', '150', '200', '250', '300', '350', '400', '450', '500', '550', '600', '650', '700', '750', '800', '850']
+
+selected_option = StringVar(root)
+selected_option.set("select number of words")
+
+dropdown_menu = OptionMenu(root, selected_option, *options)
+dropdown_menu.place(x=625, y=22, height=52, width=298)
+dropdown_menu.config(relief='solid', border=2, background='white', fg='black', cursor='hand2', font=('Lato', 15, 'bold'))
+
+#submit button
+submitButton = Button(text="Submit", command=start_function_with_loader)
+submitButton.place(x=927, y=24, height=48, width=138)
+submitButton.config(fg='black', width=10, font=('Lato', 15, 'bold'), relief='solid', border=2, background='white', activebackground='grey', cursor='hand2')
+
+#find button
+find_button = Button(root, text="Find", command=lambda: find_all(nocase=True))
+find_button.place(x=1112, y=24, height=48, width=174)
+find_button.config(fg='black', width=10, font=('Lato', 15, 'bold'), relief='solid', border=2, background='white', activebackground='grey', cursor='hand2')
+
+#replace button
+replace_button = Button(root, text="Replace", command=lambda: replace_all(nocase=True))
+replace_button.place(x=1297, y=24, height=48, width=174)
+replace_button.config(fg='black', width=10, font=('Lato', 15, 'bold'), relief='solid', border=2, background='white', activebackground='grey', cursor='hand2')
+
+#export
+exportButton = Button(text="Export as PDF", command=save_email)
+exportButton.place(x=1319, y=735, height=48, width=138)
+exportButton.config(fg='black', width=10, font=('Lato', 15, 'bold'), relief='solid', background='white', activebackground='grey', cursor='hand2')
+
+#clear text
+clearButton = Button(text="Clear Text", command=clear_text)
+clearButton.place(x=1175, y=735, height=48, width=138)
+clearButton.config(fg='black', width=10, font=('Lato', 15, 'bold'), relief='solid', background='white', activebackground='grey', cursor='hand2')
+
+#delete text.pdf after sending mail
+def on_closing():
+    # Add your cleanup code here, such as deleting a text file
+    file_to_delete = r"C:\Users\gitik\Downloads\Coding\text.pdf"
+    try:
+        os.remove(file_to_delete)
+        print(f"The file {file_to_delete} has been deleted.")
+    except FileNotFoundError:
+        print(f"The file {file_to_delete} does not exist.")
+
+    root.destroy()
+
+root.protocol("WM_DELETE_WINDOW", on_closing)
+
+root.mainloop()
